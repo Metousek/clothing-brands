@@ -5,6 +5,16 @@ $dbname = 'clothing_brands';
 $username = 'root'; // In production environment use a more secure username
 $password = ''; // In production environment use a strong password
 
+// Admin credentials - secure hash for "admin123"
+// This hash was generated with password_hash('admin123', PASSWORD_DEFAULT)
+$admin_password_hash = '$2y$10$BDJGwqMzienY1jspW/WgwO.3uapJoRdn4n4g0xhn6KcnXyi2snp6C';
+
+// Function to check admin password - uses PHP's built-in password_verify
+function verifyAdminPassword($password) {
+    global $admin_password_hash;
+    return password_verify($password, $admin_password_hash);
+}
+
 // Creating PDO connection
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname", $username, $password);

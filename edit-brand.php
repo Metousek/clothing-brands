@@ -1,20 +1,13 @@
 <?php
+// Start session at the very beginning before any output
+session_start();
+
+// Include required files
 require_once 'config.php';
+require_once 'auth_functions.php';
 
-// Check if ID is provided
-if (!isset($_GET['id']) || empty($_GET['id'])) {
-    header('Location: index.php');
-    exit;
-}
-
-$brandId = (int)$_GET['id'];
-
-// Get brand details for editing
-$brand = getBrandDetails($pdo, $brandId);
-if (!$brand) {
-    header('Location: index.php');
-    exit;
-}
+// Protect this page - only allow admin access
+requireAdminLogin();
 
 // Get all countries, categories, and materials for the form
 $countries = getAllCountries($pdo);
@@ -29,48 +22,6 @@ $clothingStyles = [
     ['id' => 4, 'name' => 'Streetwear']
 ];
 
-// Get selected categories and materials
-$selectedCategories = array_map(function($category) {
-    // Find the category ID from the name
-    global $categories;
-    foreach ($categories as $cat) {
-        if ($cat['name'] === $category) {
-            return $cat['id'];
-        }
-    }
-    return null;
-}, $brand['categories']);
-
-$selectedMaterials = array_map(function($material) {
-    // Find the material ID from the name
-    global $materials;
-    foreach ($materials as $mat) {
-        if ($mat['name'] === $material) {
-            return $mat['id'];
-        }
-    }
-    return null;
-}, $brand['materials']);
-
-// Get selected styles (from brand_styles table)
-$selectedStyles = [];
-if (isset($brand['styles'])) {
-    $selectedStyles = array_map(function($style) {
-        global $clothingStyles;
-        foreach ($clothingStyles as $s) {
-            if ($s['name'] === $style) {
-                return $s['id'];
-            }
-        }
-        return null;
-    }, $brand['styles']);
-} else {
-    // Query to get selected styles if not already in brand details
-    $styleStmt = $pdo->prepare("SELECT style_id FROM brand_styles WHERE brand_id = ?");
-    $styleStmt->execute([$brandId]);
-    $selectedStyles = array_column($styleStmt->fetchAll(PDO::FETCH_ASSOC), 'style_id');
-}
-
 $message = '';
 $messageType = '';
 
@@ -80,24 +31,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Start a transaction
         $pdo->beginTransaction();
         
-        // Update brand
+        // Insert brand
         $stmt = $pdo->prepare("
-            UPDATE brands 
-            SET name = ?, description = ?, price_range = ?, country_id = ?
-            WHERE id = ?
+            INSERT INTO brands (name, description, price_range, country_id)
+            VALUES (?, ?, ?, ?)
         ");
         $stmt->execute([
             $_POST['name'],
             $_POST['description'],
             $_POST['price_range'],
-            $_POST['country_id'] ?: null,
-            $brandId
+            $_POST['country_id'] ?: null
         ]);
         
-        // Update categories - first remove all existing ones
-        $pdo->prepare("DELETE FROM brand_categories WHERE brand_id = ?")->execute([$brandId]);
+        // Get the new brand ID
+        $brandId = $pdo->lastInsertId();
         
-        // Add new categories
+        // Insert categories
         if (!empty($_POST['categories'])) {
             $categoryInsert = $pdo->prepare("
                 INSERT INTO brand_categories (brand_id, category_id)
@@ -109,10 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         
-        // Update materials - first remove all existing ones
-        $pdo->prepare("DELETE FROM brand_materials WHERE brand_id = ?")->execute([$brandId]);
-        
-        // Add new materials
+        // Insert materials
         if (!empty($_POST['materials'])) {
             $materialInsert = $pdo->prepare("
                 INSERT INTO brand_materials (brand_id, material_id)
@@ -124,10 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         
-        // Update styles - first remove all existing ones
-        $pdo->prepare("DELETE FROM brand_styles WHERE brand_id = ?")->execute([$brandId]);
-        
-        // Add new styles
+        // Insert styles
         if (!empty($_POST['styles'])) {
             $styleInsert = $pdo->prepare("
                 INSERT INTO brand_styles (brand_id, style_id)
@@ -139,33 +82,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         
-        // Update links - first remove all existing ones
-        $pdo->prepare("DELETE FROM brand_links WHERE brand_id = ?")->execute([$brandId]);
-        
-        // Add new links
-        if (!empty($_POST['link_titles']) && !empty($_POST['link_urls'])) {
+        // Insert link if provided
+        if (!empty($_POST['link_title']) && !empty($_POST['link_url'])) {
             $linkInsert = $pdo->prepare("
                 INSERT INTO brand_links (brand_id, title, url)
                 VALUES (?, ?, ?)
             ");
-            
-            $linkTitles = $_POST['link_titles'];
-            $linkUrls = $_POST['link_urls'];
-            
-            for ($i = 0; $i < count($linkTitles); $i++) {
-                if (!empty($linkTitles[$i]) && !empty($linkUrls[$i])) {
-                    $linkInsert->execute([$brandId, $linkTitles[$i], $linkUrls[$i]]);
-                }
-            }
+            $linkInsert->execute([$brandId, $_POST['link_title'], $_POST['link_url']]);
         }
         
         // Commit the transaction
         $pdo->commit();
         
-        // Refresh brand data
-        $brand = getBrandDetails($pdo, $brandId);
-        
-        $message = 'Brand updated successfully!';
+        $message = 'Brand added successfully!';
         $messageType = 'success';
     } catch (PDOException $e) {
         // Rollback the transaction in case of error
@@ -180,12 +109,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edit Brand - Quality Clothing Database</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>Add New Brand - Quality Clothing Database</title>
+    <link rel="stylesheet" href="styles.css?v=1.0">
 </head>
 <body>
     <div class="container">
-        <h1>Edit Brand</h1>
+        <div class="header-container">
+            <h1>Add New Brand</h1>
+            <div>
+                <span class="admin-indicator">Admin Mode</span>
+                <a href="logout.php" class="logout-btn">Logout</a>
+            </div>
+        </div>
         
         <?php if ($message): ?>
             <div class="message <?php echo $messageType; ?>">
@@ -197,22 +132,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <form method="POST" action="">
                 <div class="form-group">
                     <label for="name">Brand Name*</label>
-                    <input type="text" id="name" name="name" class="form-control" value="<?php echo htmlspecialchars($brand['name']); ?>" required>
+                    <input type="text" id="name" name="name" class="form-control" required>
                 </div>
                 
                 <div class="form-group">
                     <label for="description">Description</label>
-                    <textarea id="description" name="description" class="form-control"><?php echo htmlspecialchars($brand['description']); ?></textarea>
+                    <textarea id="description" name="description" class="form-control"></textarea>
                 </div>
                 
                 <div class="form-group">
                     <label for="price_range">Price Range*</label>
                     <select id="price_range" name="price_range" class="form-control" required>
                         <option value="">Select price range</option>
-                        <option value="$" <?php if ($brand['price_range'] === '$') echo 'selected'; ?>>$ (Budget)</option>
-                        <option value="$$" <?php if ($brand['price_range'] === '$$') echo 'selected'; ?>>$$ (Mid-range)</option>
-                        <option value="$$$" <?php if ($brand['price_range'] === '$$$') echo 'selected'; ?>>$$$ (Premium)</option>
-                        <option value="$$$$" <?php if ($brand['price_range'] === '$$$$') echo 'selected'; ?>>$$$$ (Luxury)</option>
+                        <option value="$">$ (Budget)</option>
+                        <option value="$$">$$ (Mid-range)</option>
+                        <option value="$$$">$$$ (Premium)</option>
+                        <option value="$$$$">$$$$ (Luxury)</option>
                     </select>
                 </div>
                 
@@ -221,7 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <select id="country_id" name="country_id" class="form-control">
                         <option value="">Select country</option>
                         <?php foreach ($countries as $country): ?>
-                            <option value="<?php echo $country['id']; ?>" <?php if ($brand['country_id'] === $country['id']) echo 'selected'; ?>>
+                            <option value="<?php echo $country['id']; ?>">
                                 <?php echo $country['flag_emoji'] . ' ' . htmlspecialchars($country['name']); ?>
                             </option>
                         <?php endforeach; ?>
@@ -233,7 +168,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="checkbox-group">
                         <?php foreach ($clothingStyles as $style): ?>
                             <label class="checkbox-label">
-                                <input type="checkbox" name="styles[]" value="<?php echo $style['id']; ?>" <?php if (in_array($style['id'], $selectedStyles)) echo 'checked'; ?>>
+                                <input type="checkbox" name="styles[]" value="<?php echo $style['id']; ?>">
                                 <?php echo htmlspecialchars($style['name']); ?>
                             </label>
                         <?php endforeach; ?>
@@ -245,7 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="checkbox-group">
                         <?php foreach ($categories as $category): ?>
                             <label class="checkbox-label">
-                                <input type="checkbox" name="categories[]" value="<?php echo $category['id']; ?>" <?php if (in_array($category['id'], $selectedCategories)) echo 'checked'; ?>>
+                                <input type="checkbox" name="categories[]" value="<?php echo $category['id']; ?>">
                                 <?php echo htmlspecialchars($category['name']); ?>
                             </label>
                         <?php endforeach; ?>
@@ -257,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="checkbox-group">
                         <?php foreach ($materials as $material): ?>
                             <label class="checkbox-label">
-                                <input type="checkbox" name="materials[]" value="<?php echo $material['id']; ?>" <?php if (in_array($material['id'], $selectedMaterials)) echo 'checked'; ?>>
+                                <input type="checkbox" name="materials[]" value="<?php echo $material['id']; ?>">
                                 <?php echo htmlspecialchars($material['name']); ?>
                             </label>
                         <?php endforeach; ?>
@@ -265,36 +200,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
                 
                 <div class="form-group">
-                    <label>Links</label>
-                    <div id="links-container">
-                        <?php if (!empty($brand['links'])): ?>
-                            <?php foreach ($brand['links'] as $index => $link): ?>
-                                <div class="link-group">
-                                    <button type="button" class="link-remove" onclick="removeLink(this)">×</button>
-                                    <div class="form-group">
-                                        <label for="link_titles[<?php echo $index; ?>]">Link Title</label>
-                                        <input type="text" id="link_titles[<?php echo $index; ?>]" name="link_titles[]" class="form-control" value="<?php echo htmlspecialchars($link['title']); ?>" required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="link_urls[<?php echo $index; ?>]">Link URL</label>
-                                        <input type="url" id="link_urls[<?php echo $index; ?>]" name="link_urls[]" class="form-control" value="<?php echo htmlspecialchars($link['url']); ?>" required>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                    
-                    <button type="button" class="add-link-btn" onclick="addLinkField()">Add Link</button>
+                    <label for="link_title">Link Title (Optional)</label>
+                    <input type="text" id="link_title" name="link_title" class="form-control" placeholder="e.g. Official Website">
+                </div>
+                
+                <div class="form-group">
+                    <label for="link_url">Link URL (Optional)</label>
+                    <input type="url" id="link_url" name="link_url" class="form-control" placeholder="https://example.com">
                 </div>
                 
                 <div class="button-group">
                     <a href="index.php" class="cancel-btn">Cancel</a>
-                    <button type="submit" class="submit-btn">Update Brand</button>
+                    <button type="submit" class="submit-btn">Add Brand</button>
                 </div>
             </form>
         </div>
     </div>
     
-    <script src="scripts.js"></script>
+    <script src="scripts.js?v=1.0"></script>
 </body>
 </html>

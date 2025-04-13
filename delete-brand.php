@@ -1,5 +1,12 @@
 <?php
+// Start session at the very beginning
+session_start();
+
 require_once 'config.php';
+require_once 'auth_functions.php';
+
+// Protect this page - only allow admin access
+requireAdminLogin();
 
 // Check if ID is provided
 if (!isset($_GET['id']) || empty($_GET['id'])) {

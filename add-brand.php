@@ -1,5 +1,13 @@
 <?php
+// Start session at the very beginning before any output
+session_start();
+
+// Include required files
 require_once 'config.php';
+require_once 'auth_functions.php';
+
+// Protect this page - only allow admin access
+requireAdminLogin();
 
 // Get all countries, categories, and materials for the form
 $countries = getAllCountries($pdo);
@@ -102,11 +110,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Add New Brand - Quality Clothing Database</title>
-    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="styles.css?v=1.0">
 </head>
 <body>
     <div class="container">
-        <h1>Add New Brand</h1>
+        <div class="header-container">
+            <h1>Add New Brand</h1>
+            <div>
+                <span class="admin-indicator">Admin Mode</span>
+                <a href="logout.php" class="logout-btn">Logout</a>
+            </div>
+        </div>
         
         <?php if ($message): ?>
             <div class="message <?php echo $messageType; ?>">
@@ -203,6 +217,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </div>
     
-    <script src="scripts.js"></script>
+    <script src="scripts.js?v=1.0"></script>
 </body>
 </html>
